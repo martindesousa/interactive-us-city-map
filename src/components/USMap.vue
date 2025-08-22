@@ -34,7 +34,7 @@
                   @change="updateMarkers"
                 />
                 <label class="form-check-label" for="equalRadius">
-                  Equal Size for All Cities
+                  Equal Dot Sizes
                 </label>
               </div>
             </div>
