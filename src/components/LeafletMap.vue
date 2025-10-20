@@ -167,6 +167,16 @@ export default {
         cached.marker.setRadius(getRadius(pop, this.map.getZoom(), this.equalRadiusMode));
         cached.pop = pop;
         cached.row = row;
+        
+        // update popup content (rebind with new year data)
+        const yearVal = row[this.numericCurrentYear] || 0;
+        const popupContent = `${row.City}, ${row.State}: ${yearVal.toLocaleString()}`;
+        
+        // if popup is already bound, update it
+        if (cached.marker.getPopup()) {
+          cached.marker.setPopupContent(popupContent);
+        }
+        // if popup is open, it will update live; if not bound yet, it will bind on next click
       });
       
       // add new markers
@@ -190,19 +200,12 @@ export default {
         fillColor: color,
         fillOpacity: 0.6,
         weight: 1,
-        interactive: true // only make interactive if needed (clicks)
+        interactive: true
       });
 
-      // lazy popup binding
-      let popupBound = false;
-      marker.on('click', () => {
-        if (!popupBound) {
-          const yearVal = row[this.numericCurrentYear] || 0;
-          marker.bindPopup(`${row.City}, ${row.State}: ${yearVal.toLocaleString()}`);
-          popupBound = true;
-        }
-        marker.openPopup();
-      });
+      // bind popup so it can be updated later
+      const yearVal = row[this.numericCurrentYear] || 0;
+      marker.bindPopup(`${row.City}, ${row.State}: ${yearVal.toLocaleString()}`);
 
       return marker;
     },
