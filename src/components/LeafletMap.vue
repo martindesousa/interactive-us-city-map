@@ -17,7 +17,7 @@ export default {
       default: () => []
     },
     currentYear: {
-      type: Number,
+      type: [Number, String],
       default: 2020
     },
     minPopulation: {
@@ -32,127 +32,195 @@ export default {
   data() {
     return {
       map: null,
-      markers: {}
+      canvasRenderer: null,
+      markerCache: {},
+      keyToRow: {},
+      updateTimer: null // debounce timer for rapid changes
     };
+  },
+  computed: {
+    numericCurrentYear() {
+      const n = Number(this.currentYear);
+      return Number.isNaN(n) ? 0 : n;
+    }
   },
   mounted() {
     this.initializeMap();
   },
   watch: {
     currentYear() {
-      this.updateMarkers();
+      this.debouncedUpdateMarkers();
     },
     minPopulation() {
-      this.updateMarkers();
+      this.debouncedUpdateMarkers();
     },
     equalRadiusMode() {
-      this.updateMarkers();
+      this.debouncedUpdateMarkerRadii();
     },
     cityData() {
-      this.initializeMarkers();
+      this.updateMarkers();
+    }
+  },
+  beforeUnmount() {
+    // clean up
+    if (this.updateTimer) clearTimeout(this.updateTimer);
+    if (this.map) {
+      this.map.off();
+      this.map.remove();
     }
   },
   methods: {
+    // debounce updates when slider is being dragged (avoids multiple rapid updates)
+    debouncedUpdateMarkers() {
+      if (this.updateTimer) clearTimeout(this.updateTimer);
+      this.updateTimer = setTimeout(() => {
+        this.updateMarkers();
+      }, 50); // 50ms debounce
+    },
+
+    debouncedUpdateMarkerRadii() {
+      if (this.updateTimer) clearTimeout(this.updateTimer);
+      this.updateTimer = setTimeout(() => {
+        this.updateMarkerRadii();
+      }, 50);
+    },
+
     initializeMap() {
-      this.map = L.map('map').setView([37.8, -96.9], 4);
+      this.map = L.map('map', { preferCanvas: true }).setView([37.8, -96.9], 4);
+
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.carto.com/">CARTO</a>'
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.carto.com/">CARTO</a>',
+        updateWhenIdle: true, // only update tiles when map stops moving
+        keepBuffer: 2 // reduce tile buffer for faster rendering
       }).addTo(this.map);
 
-      // Listen for zoom changes to update marker radii
-      this.map.on('zoomend', this.updateMarkerRadii);
-    },
-
-    initializeMarkers() {
-      // Clear existing markers
-      Object.values(this.markers).forEach(marker => {
-        this.map.removeLayer(marker);
+      this.canvasRenderer = L.canvas({ 
+        padding: 0.5,
+        tolerance: 5 // increase click tolerance for better performance
       });
-      this.markers = {};
 
-      // Add new markers
-      for (const row of this.cityData) {
-        const pop = row[this.currentYear] || 0;
-        if (isNaN(pop) || pop < this.minPopulation) continue;
-        
-        const key = generateCityKey(row);
-        const radius = getRadius(pop, this.map.getZoom(), this.equalRadiusMode);
-        const color = getColor(pop);
-        
-        const marker = L.circleMarker([row.Latitude, row.Longitude], {
-          radius,
-          color: color,
-          fillColor: color,
-          fillOpacity: 0.6
-        }).addTo(this.map);
-        
-        marker.bindPopup(`${row.City}, ${row.State}: ${pop.toLocaleString()}`);
-        this.markers[key] = marker;
-      }
-      
-      this.bringLargerMarkersToFront();
+      // update marker radii on zoom
+      this.map.on('zoomend', this.debouncedUpdateMarkerRadii);
+
+      this.updateMarkers();
     },
 
+    // smart update: only add/remove/update markers that changed
     updateMarkers() {
       if (!this.map) return;
 
+      // batch DOM updates with requestAnimationFrame for smoother rendering
+      requestAnimationFrame(() => {
+        this.performMarkerUpdate();
+      });
+    },
+    
+    performMarkerUpdate() {
+      // build lookup of current population by key
+      const currentPopLookup = {};
+      const newKeyToRow = {};
+
       for (const row of this.cityData) {
+        const pop = row[this.numericCurrentYear] || 0;
         const key = generateCityKey(row);
-        const marker = this.markers[key];
-        const pop = row[this.currentYear] || 0;
-        
-        if (marker) {
-          if (isNaN(pop) || pop < this.minPopulation) {
-            this.map.removeLayer(marker);
-            delete this.markers[key];
-          } else {
-            const newRadius = getRadius(pop, this.map.getZoom(), this.equalRadiusMode);
-            const color = getColor(pop);
-            marker.setStyle({ color: color, fillColor: color });
-            marker.setRadius(newRadius);
-            marker.setPopupContent(`${row.City}, ${row.State}: ${pop.toLocaleString()}`);
-          }
-        } else if (!isNaN(pop) && pop >= this.minPopulation) {
-          const color = getColor(pop);
-          const newMarker = L.circleMarker([row.Latitude, row.Longitude], {
-            radius: getRadius(pop, this.map.getZoom(), this.equalRadiusMode),
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.4
-          }).addTo(this.map);
-          newMarker.bindPopup(`${row.City}, ${row.State}: ${pop.toLocaleString()}`);
-          this.markers[key] = newMarker;
+        currentPopLookup[key] = pop;
+        newKeyToRow[key] = row;
+      }
+
+      // batch marker removals
+      const toRemove = [];
+      for (const key of Object.keys(this.markerCache)) {
+        const pop = currentPopLookup[key] || 0;
+        if (isNaN(pop) || pop < this.minPopulation) {
+          toRemove.push(key);
         }
       }
       
-      this.bringLargerMarkersToFront();
-    },
+      // remove in one batch
+      toRemove.forEach(key => {
+        this.map.removeLayer(this.markerCache[key].marker);
+        delete this.markerCache[key];
+      });
 
-    bringLargerMarkersToFront() {
-      const popLookup = {};
-      for (const row of this.cityData) {
-        const key = generateCityKey(row);
-        popLookup[key] = row[this.currentYear] || 0;
+      // batch marker additions
+      const toAdd = [];
+      const toUpdate = [];
+      
+      for (const key in currentPopLookup) {
+        const pop = currentPopLookup[key];
+        if (isNaN(pop) || pop < this.minPopulation) continue;
+
+        const row = newKeyToRow[key];
+        const cached = this.markerCache[key];
+
+        if (cached) {
+          toUpdate.push({ key, row, pop, cached });
+        } else {
+          toAdd.push({ key, row, pop });
+        }
       }
       
-      const sortedKeys = Object.keys(this.markers).sort((a, b) => popLookup[a] - popLookup[b]);
-      for (const key of sortedKeys) {
-        this.markers[key].bringToFront();
-      }
+      // update existing markers
+      toUpdate.forEach(({ key, row, pop, cached }) => {
+        const color = getColor(pop);
+        cached.marker.setStyle({ color, fillColor: color });
+        cached.marker.setRadius(getRadius(pop, this.map.getZoom(), this.equalRadiusMode));
+        cached.pop = pop;
+        cached.row = row;
+      });
+      
+      // add new markers
+      toAdd.forEach(({ key, row, pop }) => {
+        const marker = this.createCityMarker(row, pop);
+        marker.addTo(this.map);
+        this.markerCache[key] = { marker, row, pop };
+      });
+      
+      this.keyToRow = newKeyToRow;
+    },
+
+    createCityMarker(row, pop) {
+      const color = getColor(pop);
+      const radius = getRadius(pop, this.map ? this.map.getZoom() : 4, this.equalRadiusMode);
+
+      const marker = L.circleMarker([row.Latitude, row.Longitude], {
+        renderer: this.canvasRenderer,
+        radius,
+        color,
+        fillColor: color,
+        fillOpacity: 0.6,
+        weight: 1,
+        interactive: true // only make interactive if needed (clicks)
+      });
+
+      // lazy popup binding
+      let popupBound = false;
+      marker.on('click', () => {
+        if (!popupBound) {
+          const yearVal = row[this.numericCurrentYear] || 0;
+          marker.bindPopup(`${row.City}, ${row.State}: ${yearVal.toLocaleString()}`);
+          popupBound = true;
+        }
+        marker.openPopup();
+      });
+
+      return marker;
     },
 
     updateMarkerRadii() {
       if (!this.map) return;
-      
-      for (const row of this.cityData) {
-        const key = generateCityKey(row);
-        const marker = this.markers[key];
-        const pop = row[this.currentYear] || 0;
-        
-        if (marker && !isNaN(pop) && pop >= this.minPopulation) {
-          marker.setRadius(getRadius(pop, this.map.getZoom(), this.equalRadiusMode));
+
+      // batch radius updates with requestAnimationFrame
+      requestAnimationFrame(() => {
+        const zoom = this.map.getZoom();
+        for (const key in this.markerCache) {
+          const cached = this.markerCache[key];
+          const pop = cached.pop || 0;
+          if (!isNaN(pop) && pop >= this.minPopulation) {
+            cached.marker.setRadius(getRadius(pop, zoom, this.equalRadiusMode));
+          }
         }
-      }
+      });
     }
   }
 };

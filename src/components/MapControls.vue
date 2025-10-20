@@ -12,7 +12,7 @@
               <input
                 type="number"
                 :value="minPopulation"
-                @input="$emit('update:minPopulation', $event.target.value)"
+                @input="$emit('update:minPopulation', Number($event.target.value))"
                 min="0"
                 step="500"
                 class="form-control d-inline-block ms-2"
@@ -39,7 +39,7 @@
             :min="startYear"
             :max="endYear"
             :value="currentYear"
-            @input="$emit('update:currentYear', $event.target.value)"
+            @input="$emit('update:currentYear', Number($event.target.value))"
             step="10"
             class="form-range"
             style="width: 600px;"
@@ -57,6 +57,10 @@
 export default {
   name: "MapControls",
   props: {
+    currentYear: {
+      type: [Number, String],
+      default: 1910
+    },
     minPopulation: {
       type: Number,
       default: 2500
@@ -65,16 +69,13 @@ export default {
       type: Boolean,
       default: false
     },
-    currentYear: {
-      type: Number,
-      default: 2020
-    },
+    // define slider range props (accept strings too if parent passes them as such)
     startYear: {
-      type: Number,
-      default: 1790
+      type: [Number, String],
+      default: 1910
     },
     endYear: {
-      type: Number,
+      type: [Number, String],
       default: 2020
     }
   },
