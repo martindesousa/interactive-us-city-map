@@ -35,7 +35,8 @@ export default {
       canvasRenderer: null,
       markerCache: {},
       keyToRow: {},
-      updateTimer: null // debounce timer for rapid changes
+      updateTimer: null, // debounce timer for rapid changes
+      LARGE_CITY_THRESHOLD: 100000 // only re-order cities above 100k population
     };
   },
   computed: {
@@ -75,7 +76,7 @@ export default {
       if (this.updateTimer) clearTimeout(this.updateTimer);
       this.updateTimer = setTimeout(() => {
         this.updateMarkers();
-      }, 50); // 50ms debounce
+      }, 40); // 40ms debounce
     },
 
     debouncedUpdateMarkerRadii() {
@@ -176,14 +177,28 @@ export default {
         if (cached.marker.getPopup()) {
           cached.marker.setPopupContent(popupContent);
         }
-        // if popup is open, it will update live; if not bound yet, it will bind on next click
       });
       
       // add new markers
+      toAdd.sort((a, b) => a.pop - b.pop);
       toAdd.forEach(({ key, row, pop }) => {
         const marker = this.createCityMarker(row, pop);
         marker.addTo(this.map);
         this.markerCache[key] = { marker, row, pop };
+      });
+      
+      // bring all large cities to front in sorted order (smallest to largest)
+      const allLargeCities = [];
+      for (const key in this.markerCache) {
+        const cached = this.markerCache[key];
+        if (cached.pop >= this.LARGE_CITY_THRESHOLD) {
+          allLargeCities.push({ key, pop: cached.pop });
+        }
+      }
+      
+      allLargeCities.sort((a, b) => a.pop - b.pop);
+      allLargeCities.forEach(({ key }) => {
+        this.markerCache[key].marker.bringToFront();
       });
       
       this.keyToRow = newKeyToRow;
