@@ -2,6 +2,8 @@
 
 This project is an interactive US city map website that allows you to watch the cities in the United States grow (or shrink) from 1790-2020. The data points are all based on U.S. Census data from each decennial. On the site, you have the option to use a slider which will pick the year for you. For each data point, you can see the name of the city and the state it was or is in.  
 
+Visit the site here: https://interactive-us-city-map.vercel.app/
+
 # Data Sources:
 
 All data is stored in public/datafiles. 
